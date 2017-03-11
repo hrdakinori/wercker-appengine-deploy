@@ -1,0 +1,91 @@
+box: google/cloud-sdk
+
+build:
+    steps:
+        - install-packages:
+          packages: git gcc
+
+        - script:
+            name: gcloud info
+            code: |
+                gcloud info
+
+        - script:
+            name: AppEngine SDK
+            code: |
+              sudo chmod a+x /google-cloud-sdk/platform/google_appengine/go???
+              sudo chmod a+x /google-cloud-sdk/platform/google_appengine/goroot/bin/go*
+              sudo chmod -R a+w /google-cloud-sdk/platform/google_appengine/goroot/pkg
+              export PATH=$PATH:/google-cloud-sdk/platform/google_appengine
+              goapp env
+
+        - script:
+            name: set GOPATH
+            code: |
+              export GOPATH=$WERCKER_ROOT/go
+              mkdir $GOPATH
+              mkdir $GOPATH/bin
+              export PATH=$PATH:$GOPATH/bin
+
+        - wercker/golint
+
+        # Gets the dependencies
+        - script:
+            name: go get
+            code: |
+             goapp get -d ./gae/...
+
+        # Build the project
+        - script:
+            name: go build
+            code: |
+              goapp build ./gae/...
+
+        # Test the project
+        - script:
+            name: go test
+            code: |
+              goapp test ./gae/...
+
+deploy:
+    steps:
+        - create-file:
+            filename: gcloud-service-key.base64
+            overwrite: true
+            hide-from-log: true
+            content: |-
+              ${SERVICE_ACCOUNT_JSON}
+        - script:
+            name: gcloud key
+            code: |
+                cat gcloud-service-key.base64 | base64 -d -i > gcloud-service-key.json
+        - script:
+            name: gcloud auth
+            code: |
+                gcloud auth activate-service-account ${SERVICE_ACCOUNT} --key-file gcloud-service-key.json --project ${PROJECT_ID}
+                gcloud config set project ${PROJECT_ID}
+        - script:
+            name: rm
+            code: |
+                rm -f gcloud-service-key.*
+
+        - script:
+            name: AppEngine SDK
+            code: |
+              export PATH=$PATH:/google-cloud-sdk/platform/google_appengine
+
+        - script:
+            name: set GOPATH
+            code: |
+              export GOPATH=$WERCKER_ROOT/go
+              export PATH=$PATH:$GOPATH/bin
+
+        - script:
+            name: gcloud info
+            code: |
+                gcloud info
+
+        - script:
+            name: deploy App Engine
+            code: |
+                appcfg.py update ./gae/ --oauth2_access_token $(gcloud auth print-access-token 2> /dev/null)
